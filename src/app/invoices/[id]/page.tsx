@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import React from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { invoiceService } from '@/lib/api';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 
 export default function ViewInvoice({ params }) {
   const router = useRouter();
@@ -13,6 +15,10 @@ export default function ViewInvoice({ params }) {
   const [error, setError] = useState(null);
   const [showSendDialog, setShowSendDialog] = useState(false);
   const [sendMethod, setSendMethod] = useState('email');
+  const [generatingPdf, setGeneratingPdf] = useState(false);
+  
+  // Reference to the invoice content for PDF generation
+  const invoiceRef = useRef(null);
   
   // Email state
   const [emailTo, setEmailTo] = useState('');
@@ -68,9 +74,69 @@ export default function ViewInvoice({ params }) {
     }
   }, [invoiceId]);
 
-  const handleDownloadPdf = () => {
-    // In a real app, this would generate and download a PDF
-    alert('PDF download functionality would be implemented here');
+  const handleDownloadPdf = async () => {
+    if (!invoiceRef.current) return;
+    
+    setGeneratingPdf(true);
+    
+    try {
+      // Create a clone of the invoice DOM to modify for PDF
+      const invoiceClone = invoiceRef.current.cloneNode(true);
+      const tempDiv = document.createElement('div');
+      tempDiv.appendChild(invoiceClone);
+      
+      // Temporarily append to body but with hidden styles
+      tempDiv.style.position = 'absolute';
+      tempDiv.style.left = '-9999px';
+      tempDiv.style.top = '-9999px';
+      document.body.appendChild(tempDiv);
+      
+      // Override any problematic CSS (like oklch)
+      const allElements = tempDiv.querySelectorAll('*');
+      allElements.forEach(el => {
+        // Get computed style
+        const style = window.getComputedStyle(el);
+        // Apply computed RGB colors directly to override any problematic color formats
+        el.style.color = style.color;
+        el.style.backgroundColor = style.backgroundColor;
+        el.style.borderColor = style.borderColor;
+      });
+      
+      // Capture the invoice content as an image
+      const canvas = await html2canvas(invoiceClone, { 
+        scale: 2, // Increase scale for better quality
+        useCORS: true, // Enable cross-origin image fetching
+        logging: false // Disable logging
+      });
+      
+      // Clean up - remove the temp div
+      document.body.removeChild(tempDiv);
+      
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgWidth = 210; // A4 width in mm
+      const pageHeight = 295; // A4 height in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      
+      let position = 0;
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+      
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+      
+      pdf.save(`invoice_${invoice.invoiceNumber || invoice._id}.pdf`);
+      setGeneratingPdf(false);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      setGeneratingPdf(false);
+      alert('Failed to generate PDF. Please try again.');
+    }
   };
 
   const handleSendEmail = async (e) => {
@@ -256,8 +322,9 @@ export default function ViewInvoice({ params }) {
           <button 
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
             onClick={handleDownloadPdf}
+            disabled={generatingPdf}
           >
-            Download PDF
+            {generatingPdf ? 'Generating PDF...' : 'Download PDF'}
           </button>
           <button 
             className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
@@ -274,7 +341,7 @@ export default function ViewInvoice({ params }) {
         </div>
       </div>
       
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden" ref={invoiceRef}>
         {/* Invoice Header */}
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
