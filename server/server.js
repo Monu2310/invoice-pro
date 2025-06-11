@@ -5,8 +5,6 @@ const dotenv = require('dotenv');
 
 // Load environment variables
 dotenv.config();
-
-// Create Express app
 const app = express();
 
 // Configure detailed error logging
