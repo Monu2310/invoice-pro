@@ -38,14 +38,20 @@ export default function Register() {
     try {
       const response = await authService.register({ name, email, password });
       
-      // Save token and user info to localStorage
-      localStorage.setItem('token', response.token);
-      localStorage.setItem('user', JSON.stringify(response.user));
-      
-      // Reload the page to trigger auth context update
-      window.location.href = '/dashboard';
-    } catch (err: any) {
-      setError(err.message || 'Registration failed. Please try again.');
+      // Type guard for registration response
+      if (response && typeof response === 'object' && 'token' in response && 'user' in response) {
+        const registerResponse = response as { token: string; user: unknown };
+        
+        // Save token and user info to localStorage
+        localStorage.setItem('token', registerResponse.token);
+        localStorage.setItem('user', JSON.stringify(registerResponse.user));
+        
+        // Reload the page to trigger auth context update
+        window.location.href = '/dashboard';
+      }
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Registration failed. Please try again.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }

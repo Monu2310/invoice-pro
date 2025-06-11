@@ -1,26 +1,122 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import React from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
-import { orderService } from '@/lib/api';
+import { orderService, Order, Customer } from '@/lib/api';
+import PDFDownloadButton from '@/components/ui/PDFDownloadButton';
 
-export default function ViewOrder({ params }) {
+interface Params {
+  id: string;
+}
+
+interface Address {
+  street?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+  country?: string;
+}
+
+export default function ViewOrder({ params }: { params: Promise<Params> }) {
   const router = useRouter();
-  const [order, setOrder] = useState(null);
+  const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Reference to the order content for PDF generation
+  const orderRef = useRef<HTMLDivElement>(null);
 
-  // Unwrap the params object with React.use()
-  const unwrappedParams = React.use(params);
-  const orderId = unwrappedParams.id;
+  // Unwrap the params object with React.use() with error handling
+  let orderId: string;
+  try {
+    const unwrappedParams = React.use(params) as Params;
+    orderId = unwrappedParams?.id;
+    console.log('Order ID from params:', orderId);
+    
+    if (!orderId) {
+      console.error('Order ID is undefined or null');
+      throw new Error('Order ID is required');
+    }
+  } catch (error) {
+    console.error('Error unwrapping params:', error);
+    orderId = 'error';
+  }
+
+  // Helper function to get customer name with enhanced error handling
+  const getCustomerName = (customer: Customer | string | undefined): string => {
+    try {
+      console.log('getCustomerName called with:', customer, 'type:', typeof customer);
+      
+      if (!customer) {
+        console.log('Customer is null/undefined');
+        return 'Unknown Customer';
+      }
+      
+      if (typeof customer === 'string') {
+        console.log('Customer is a string ID:', customer);
+        return 'Unknown Customer';
+      }
+      
+      // Check if customer is an object but might be missing properties
+      if (typeof customer === 'object' && customer !== null) {
+        console.log('Customer object properties:', Object.keys(customer));
+        const name = customer.name;
+        console.log('Customer name property:', name, 'type:', typeof name);
+        
+        if (name && typeof name === 'string' && name.trim()) {
+          return name.trim();
+        }
+        
+        // If name is missing, try to construct from other fields
+        if (customer.email && typeof customer.email === 'string' && customer.email.trim()) {
+          try {
+            const emailParts = customer.email.split('@');
+            return emailParts[0] || 'Unknown Customer';
+          } catch (splitError) {
+            console.error('Error splitting email:', splitError, 'email:', customer.email);
+            return 'Unknown Customer';
+          }
+        }
+        
+        return 'Unknown Customer';
+      }
+      
+      console.error('Unexpected customer type:', typeof customer, customer);
+      return 'Unknown Customer';
+    } catch (error) {
+      console.error('Error in getCustomerName:', error);
+      return 'Unknown Customer';
+    }
+  };
+
+  // Helper function to get customer email
+  const getCustomerEmail = (customer: Customer | string | undefined): string => {
+    if (!customer) return 'No email provided';
+    if (typeof customer === 'string') return 'No email provided';
+    return customer.email || 'No email provided';
+  };
+
+  // Helper function to get customer phone
+  const getCustomerPhone = (customer: Customer | string | undefined): string => {
+    if (!customer) return 'No phone provided';
+    if (typeof customer === 'string') return 'No phone provided';
+    return customer.phone || 'No phone provided';
+  };
 
   useEffect(() => {
     async function fetchOrder() {
       try {
         setLoading(true);
         const data = await orderService.getById(orderId);
+        console.log('Fetched order data:', data);
+        console.log('Customer data:', data.customer);
+        console.log('Customer type:', typeof data.customer);
+        if (data.customer && typeof data.customer === 'object') {
+          console.log('Customer name:', data.customer.name);
+          console.log('Customer name type:', typeof data.customer.name);
+        }
         setOrder(data);
         setLoading(false);
       } catch (err) {
@@ -36,7 +132,7 @@ export default function ViewOrder({ params }) {
   }, [orderId]);
 
   // Format customer address
-  const formatAddress = (address) => {
+  const formatAddress = (address: Address | string | undefined) => {
     if (!address) return 'No address provided';
     
     if (typeof address === 'string') return address;
@@ -95,29 +191,69 @@ export default function ViewOrder({ params }) {
   }
 
   // Format dates with error handling
-  const orderDate = order?.orderDate || order?.createdAt 
-    ? new Date(order.orderDate || order.createdAt).toLocaleDateString('en-IN', { 
+  const orderDate = (() => {
+    try {
+      const dateValue = order?.orderDate || order?.createdAt;
+      if (!dateValue) return 'N/A';
+      
+      const date = new Date(dateValue);
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid date value:', dateValue);
+        return 'N/A';
+      }
+      
+      return date.toLocaleDateString('en-IN', { 
         day: '2-digit', 
         month: 'short', 
         year: 'numeric' 
-      })
-    : 'N/A';
+      });
+    } catch (error) {
+      console.error('Error formatting order date:', error);
+      return 'N/A';
+    }
+  })();
   
-  const updatedDate = order?.updatedAt 
-    ? new Date(order.updatedAt).toLocaleDateString('en-IN', {
+  const updatedDate = (() => {
+    try {
+      if (!order?.updatedAt) return 'N/A';
+      
+      const date = new Date(order.updatedAt);
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid updatedAt date:', order.updatedAt);
+        return 'N/A';
+      }
+      
+      return date.toLocaleDateString('en-IN', {
         day: '2-digit',
         month: 'short',
         year: 'numeric'
-      }) 
-    : 'N/A';
+      });
+    } catch (error) {
+      console.error('Error formatting updated date:', error);
+      return 'N/A';
+    }
+  })();
 
-  const paidDate = order?.paymentDetails?.paidDate 
-    ? new Date(order.paymentDetails.paidDate).toLocaleDateString('en-IN', {
+  const paidDate = (() => {
+    try {
+      if (!order?.paymentDetails?.paidDate) return 'N/A';
+      
+      const date = new Date(order.paymentDetails.paidDate);
+      if (isNaN(date.getTime())) {
+        console.warn('Invalid paidDate:', order.paymentDetails.paidDate);
+        return 'N/A';
+      }
+      
+      return date.toLocaleDateString('en-IN', {
         day: '2-digit',
         month: 'short',
         year: 'numeric'
-      }) 
-    : 'N/A';
+      });
+    } catch (error) {
+      console.error('Error formatting paid date:', error);
+      return 'N/A';
+    }
+  })();
 
   return (
     <DashboardLayout>
@@ -138,6 +274,72 @@ export default function ViewOrder({ params }) {
           </p>
         </div>
         <div className="flex space-x-2">
+          <PDFDownloadButton
+            elementRef={orderRef}
+            options={{
+              filename: (() => {
+                try {
+                  // Safe fallback values with extra null checks
+                  const orderNumber = (order?.orderNumber || order?._id || 'unknown').toString();
+                  const customerName = getCustomerName(order?.customer);
+                  
+                  console.log('PDF filename generation - orderNumber:', orderNumber);
+                  console.log('PDF filename generation - customerName:', customerName);
+                  console.log('PDF filename generation - customerName type:', typeof customerName);
+                  
+                  // Ensure we have a valid string for filename generation
+                  let safeName = 'unknown';
+                  if (customerName && typeof customerName === 'string' && customerName.trim()) {
+                    // More defensive string operations with null checks
+                    safeName = String(customerName)
+                      .replace(/[^a-zA-Z0-9\s-_]/g, '') // Remove special chars
+                      .replace(/\s+/g, '_') // Replace spaces with underscores
+                      .toLowerCase() // Convert to lowercase
+                      .substring(0, 20); // Limit length
+                  }
+                  
+                  // Additional validation for safeName
+                  if (!safeName || safeName.trim() === '') {
+                    safeName = 'customer';
+                  }
+                  
+                  const filename = `order_${String(orderNumber)}_${String(safeName)}.pdf`;
+                  console.log('Generated filename:', filename);
+                  return filename;
+                } catch (error) {
+                  console.error('Error generating PDF filename:', error);
+                  console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+                  const fallbackName = `order_${Date.now()}_error.pdf`;
+                  console.log('Using fallback filename:', fallbackName);
+                  return fallbackName;
+                }
+              })(),
+              title: `Order ${order.orderNumber || order._id}`,
+              orientation: 'portrait',
+              format: 'a4'
+            }}
+            onError={(error) => {
+              console.error('PDF generation error details:', error);
+              console.error('Error type:', typeof error);
+              console.error('Error string representation:', String(error));
+              
+              // Try to extract more information about the error
+              if (error instanceof Error) {
+                console.error('Error message:', error.message);
+                console.error('Error stack:', error.stack);
+              }
+              
+              alert(`PDF generation failed: ${error}`);
+            }}
+            onSuccess={(filename) => {
+              console.log('PDF generated successfully:', filename);
+            }}
+            onGenerating={(generating) => {
+              console.log('PDF generating:', generating);
+            }}
+            variant="primary"
+            size="md"
+          />
           {order.status !== 'Cancelled' && order.status !== 'Delivered' && (
             <button 
               className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
@@ -155,15 +357,15 @@ export default function ViewOrder({ params }) {
         </div>
       </div>
       
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden" ref={orderRef}>
         {/* Order Header */}
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1">Customer Information:</h3>
-              <p className="text-gray-700 dark:text-gray-300 font-medium">{order.customer?.name || 'Unknown Customer'}</p>
-              <p className="text-gray-600 dark:text-gray-400">{order.customer?.email || 'No email provided'}</p>
-              <p className="text-gray-600 dark:text-gray-400">{order.customer?.phone || 'No phone provided'}</p>
+              <p className="text-gray-700 dark:text-gray-300 font-medium">{getCustomerName(order.customer)}</p>
+              <p className="text-gray-600 dark:text-gray-400">{getCustomerEmail(order.customer)}</p>
+              <p className="text-gray-600 dark:text-gray-400">{getCustomerPhone(order.customer)}</p>
               
               <div className="mt-4">
                 <h4 className="text-md font-bold text-gray-700 dark:text-gray-300 mb-1">Shipping Address:</h4>
@@ -224,10 +426,10 @@ export default function ViewOrder({ params }) {
                       <span className="font-medium">{order.paymentDetails.transactionId}</span>
                     </p>
                   )}
-                  {order.paymentDetails.paidAmount > 0 && (
+                  {(order.paymentDetails.paidAmount || 0) > 0 && (
                     <p className="text-gray-700 dark:text-gray-300">
                       <span className="text-gray-600 dark:text-gray-400">Amount Paid: </span>
-                      <span className="font-medium">₹{parseFloat(order.paymentDetails.paidAmount).toFixed(2)}</span>
+                      <span className="font-medium">₹{parseFloat(String(order.paymentDetails.paidAmount || 0)).toFixed(2)}</span>
                     </p>
                   )}
                   {order.paymentDetails.paidDate && (
@@ -262,9 +464,9 @@ export default function ViewOrder({ params }) {
                     {item.description && <div className="text-gray-500 dark:text-gray-400 text-xs mt-1">{item.description}</div>}
                   </td>
                   <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{item.quantity}</td>
-                  <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{parseFloat(item.price).toFixed(2)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{parseFloat(String(item.price)).toFixed(2)}</td>
                   <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{item.tax || 0}%</td>
-                  <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{parseFloat(item.amount).toFixed(2)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{parseFloat(String(item.quantity * item.price)).toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
@@ -277,39 +479,39 @@ export default function ViewOrder({ params }) {
             <div className="w-full md:w-72">
               <div className="flex justify-between py-2">
                 <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
-                <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(order.subtotal || 0).toFixed(2)}</span>
+                <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(String(order.subtotal || 0)).toFixed(2)}</span>
               </div>
               
-              {order.taxTotal > 0 && (
+              {(order.taxTotal || 0) > 0 && (
                 <div className="flex justify-between py-2">
                   <span className="text-gray-600 dark:text-gray-400">Tax:</span>
-                  <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(order.taxTotal || 0).toFixed(2)}</span>
+                  <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(String(order.taxTotal || 0)).toFixed(2)}</span>
                 </div>
               )}
               
-              {order.discount > 0 && (
+              {(order.discount || 0) > 0 && (
                 <div className="flex justify-between py-2">
                   <span className="text-gray-600 dark:text-gray-400">Discount:</span>
-                  <span className="font-medium text-gray-800 dark:text-white">-₹{parseFloat(order.discount || 0).toFixed(2)}</span>
+                  <span className="font-medium text-gray-800 dark:text-white">-₹{parseFloat(String(order.discount || 0)).toFixed(2)}</span>
                 </div>
               )}
               
-              {order.shippingCost > 0 && (
+              {(order.shippingCost || 0) > 0 && (
                 <div className="flex justify-between py-2">
                   <span className="text-gray-600 dark:text-gray-400">Shipping:</span>
-                  <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(order.shippingCost || 0).toFixed(2)}</span>
+                  <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(String(order.shippingCost || 0)).toFixed(2)}</span>
                 </div>
               )}
               
               <div className="flex justify-between py-2 border-t border-gray-200 dark:border-gray-700">
                 <span className="text-lg font-medium text-gray-800 dark:text-white">Total:</span>
-                <span className="text-lg font-bold text-gray-800 dark:text-white">₹{parseFloat(order.total || 0).toFixed(2)}</span>
+                <span className="text-lg font-bold text-gray-800 dark:text-white">₹{parseFloat(String(order.total || 0)).toFixed(2)}</span>
               </div>
               
               {order.paymentStatus === 'Paid' && (
                 <div className="flex justify-between py-2 border-t border-gray-200 dark:border-gray-700 text-green-600 dark:text-green-400">
                   <span className="font-medium">Paid:</span>
-                  <span className="font-bold">₹{parseFloat(order.paymentDetails?.paidAmount || order.total || 0).toFixed(2)}</span>
+                  <span className="font-bold">₹{parseFloat(String(order.paymentDetails?.paidAmount || order.total || 0)).toFixed(2)}</span>
                 </div>
               )}
               
@@ -317,11 +519,11 @@ export default function ViewOrder({ params }) {
                 <>
                   <div className="flex justify-between py-2 border-t border-gray-200 dark:border-gray-700 text-green-600 dark:text-green-400">
                     <span className="font-medium">Paid:</span>
-                    <span className="font-bold">₹{parseFloat(order.paymentDetails?.paidAmount || 0).toFixed(2)}</span>
+                    <span className="font-bold">₹{parseFloat(String(order.paymentDetails?.paidAmount || 0)).toFixed(2)}</span>
                   </div>
                   <div className="flex justify-between py-2 text-red-600 dark:text-red-400">
                     <span className="font-medium">Balance Due:</span>
-                    <span className="font-bold">₹{parseFloat(order.total - (order.paymentDetails?.paidAmount || 0)).toFixed(2)}</span>
+                    <span className="font-bold">₹{String((order.total || 0) - (order.paymentDetails?.paidAmount || 0)).replace(/^/, '').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1,')}</span>
                   </div>
                 </>
               )}

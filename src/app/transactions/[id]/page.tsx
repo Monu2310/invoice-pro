@@ -1,28 +1,36 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, use, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import DashboardLayout from "@/components/layouts/DashboardLayout";
-import { transactionService } from "@/lib/api";
+import { transactionService, Transaction } from "@/lib/api";
+import PDFDownloadButton from '@/components/ui/PDFDownloadButton';
 
 // Utility function to check if a date is valid
-const isValidDate = (dateString) => {
+const isValidDate = (dateString: string | Date | undefined | null) => {
   if (!dateString) return false;
   
   const date = new Date(dateString);
-  return date instanceof Date && !isNaN(date);
+  return date instanceof Date && !isNaN(date.getTime());
 };
 
-export default function TransactionDetail({ params }) {
+interface Params {
+  id: string;
+}
+
+export default function TransactionDetail({ params }: { params: Promise<Params> }) {
   // Unwrap params using React.use()
-  const unwrappedParams = use(params);
+  const unwrappedParams = use(params) as Params;
   const transactionId = unwrappedParams.id;
   
   const router = useRouter();
-  const [transaction, setTransaction] = useState(null);
+  const [transaction, setTransaction] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Reference to the transaction content for PDF generation
+  const transactionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const fetchTransaction = async () => {
@@ -40,7 +48,7 @@ export default function TransactionDetail({ params }) {
           amount: data?.amount,
           amountType: data?.amount ? typeof data.amount : 'undefined',
           date: data?.date,
-          dateValid: data?.date ? !isNaN(new Date(data.date)) : false
+          dateValid: data?.date ? !isNaN(new Date(data.date).getTime()) : false
         });
         
         if (!data) {
@@ -58,7 +66,7 @@ export default function TransactionDetail({ params }) {
         // Check date validity
         if (data.date) {
           const dateObj = new Date(data.date);
-          console.log('Date parsed as:', dateObj, 'Valid:', !isNaN(dateObj));
+          console.log('Date parsed as:', dateObj, 'Valid:', !isNaN(dateObj.getTime()));
         } else {
           console.warn('Transaction has no date field');
         }
@@ -80,8 +88,10 @@ export default function TransactionDetail({ params }) {
   const handleDelete = async () => {
     if (window.confirm('Are you sure you want to delete this transaction? This action cannot be undone.')) {
       try {
-        await transactionService.delete(transaction._id);
-        router.push('/transactions?refresh=true');
+        if (transaction?._id) {
+          await transactionService.delete(transaction._id);
+          router.push('/transactions?refresh=true');
+        }
       } catch (err) {
         console.error('Error deleting transaction:', err);
         alert('Failed to delete transaction. Please try again.');
@@ -131,6 +141,24 @@ export default function TransactionDetail({ params }) {
           </p>
         </div>
         <div className="flex gap-2">
+          <PDFDownloadButton
+            elementRef={transactionRef}
+            options={{
+              filename: `transaction_${transaction.transactionId || transaction._id}_receipt.pdf`,
+              title: `Transaction ${transaction.transactionId || transaction._id}`,
+              orientation: 'portrait',
+              format: 'a4'
+            }}
+            onSuccess={(filename: string) => {
+              console.log(`PDF generated successfully: ${filename}`);
+            }}
+            onError={(error: string) => {
+              console.error('PDF generation failed:', error);
+              alert(`Failed to generate PDF: ${error}`);
+            }}
+            variant="primary"
+            size="md"
+          />
           <Link 
             href="/transactions" 
             className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center"
@@ -152,7 +180,7 @@ export default function TransactionDetail({ params }) {
         </div>
       </div>
       
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden" ref={transactionRef}>
         <div className="p-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
@@ -167,7 +195,7 @@ export default function TransactionDetail({ params }) {
                 <div>
                   <label className="block text-sm font-medium text-gray-500 dark:text-gray-400">Amount</label>
                   <div className="mt-1 text-gray-900 dark:text-white text-xl font-semibold">
-                    {transaction.amount ? `₹${parseFloat(transaction.amount).toLocaleString('en-IN')}` : 'Not specified'}
+                    {transaction.amount ? `₹${parseFloat(String(transaction.amount)).toLocaleString('en-IN')}` : 'Not specified'}
                   </div>
                 </div>
                 
@@ -193,7 +221,7 @@ export default function TransactionDetail({ params }) {
                   <label className="block text-sm font-medium text-gray-500 dark:text-gray-400">Date</label>
                   <div className="mt-1 text-gray-900 dark:text-white">
                     {isValidDate(transaction.date || transaction.createdAt) ? 
-                      new Date(transaction.date || transaction.createdAt).toLocaleDateString('en-IN', { 
+                      new Date(transaction.date || transaction.createdAt || '').toLocaleDateString('en-IN', { 
                         day: '2-digit', 
                         month: 'long', 
                         year: 'numeric',
@@ -229,10 +257,10 @@ export default function TransactionDetail({ params }) {
                   <div className="mt-1 text-gray-900 dark:text-white">
                     {transaction.invoice ? (
                       <Link 
-                        href={`/invoices/${transaction.invoice._id || transaction.invoice}`}
+                        href={`/invoices/${typeof transaction.invoice === 'string' ? transaction.invoice : transaction.invoice._id || transaction.invoice}`}
                         className="text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300"
                       >
-                        Invoice #{transaction.invoice.invoiceNumber || transaction.invoice._id || transaction.invoice}
+                        Invoice #{typeof transaction.invoice === 'string' ? transaction.invoice : (transaction.invoice.invoiceNumber || transaction.invoice._id || 'Unknown')}
                       </Link>
                     ) : transaction.invoiceId ? (
                       <Link 

@@ -3,15 +3,16 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import DashboardLayout from "@/components/layouts/DashboardLayout";
-import { transactionService } from "@/lib/api";
+import { transactionService, Transaction } from "@/lib/api";
+import { useAdvancedPDFGenerator } from '@/lib/pdf-utils';
 import Link from 'next/link';
 
 // Utility function to check if a date is valid
-const isValidDate = (dateString) => {
+const isValidDate = (dateString: string | Date | undefined | null) => {
   if (!dateString) return false;
   
   const date = new Date(dateString);
-  return date instanceof Date && !isNaN(date) && date.getFullYear() > 1970;
+  return date instanceof Date && !isNaN(date.getTime()) && date.getFullYear() > 1970;
 };
 
 export default function Transactions() {
@@ -19,9 +20,9 @@ export default function Transactions() {
   const searchParams = useSearchParams();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState('All');
-  const [transactions, setTransactions] = useState([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   
   // Function to fetch transactions that can be called multiple times
@@ -79,7 +80,9 @@ export default function Transactions() {
     
     try {
       const transactionId = ((transaction.transactionId || transaction._id || '') + '').toLowerCase();
-      const customerName = ((transaction.customer?.name || '') + '').toLowerCase();
+      const customerName = typeof transaction.customer === 'string' ? 
+        transaction.customer.toLowerCase() : 
+        ((transaction.customer?.name || '') + '').toLowerCase();
       const reference = ((transaction.invoiceId || transaction.reference || '') + '').toLowerCase();
       
       const searchLower = searchQuery.toLowerCase();
@@ -98,15 +101,15 @@ export default function Transactions() {
     }
   });
 
-  const handleViewTransaction = (id) => {
+  const handleViewTransaction = (id: string) => {
     router.push(`/transactions/${id}`);
   };
 
-  const handleEditTransaction = (id) => {
+  const handleEditTransaction = (id: string) => {
     router.push(`/transactions/${id}/edit`);
   };
 
-  const handleDeleteTransaction = async (id) => {
+  const handleDeleteTransaction = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this transaction? This action cannot be undone.')) {
       try {
         await transactionService.delete(id);
@@ -116,6 +119,35 @@ export default function Transactions() {
         console.error('Error deleting transaction:', err);
         alert('Failed to delete transaction. Please try again.');
       }
+    }
+  };
+
+  // PDF export functionality
+  const { generateTablePDF, isGenerating: isPDFGenerating, error: pdfError } = useAdvancedPDFGenerator();
+
+  const handleExportToPDF = async () => {
+    const tableData = filteredTransactions.map(transaction => ({
+      'Transaction ID': transaction.transactionId || transaction._id || 'N/A',
+      'Type': transaction.type || 'N/A',
+      'Amount': `$${(transaction.amount || 0).toFixed(2)}`,
+      'Date': isValidDate(transaction.date) ? new Date(transaction.date).toLocaleDateString() : 'N/A',
+      'Status': transaction.status || 'N/A',
+      'Reference': transaction.invoiceId || transaction.reference || 'N/A'
+    }));
+
+    const headers = ['Transaction ID', 'Type', 'Amount', 'Date', 'Status', 'Reference'];
+    
+    const success = await generateTablePDF(tableData, headers, {
+      filename: `transactions_export_${new Date().toISOString().split('T')[0]}.pdf`,
+      title: 'Transactions Report',
+      orientation: 'landscape',
+      format: 'a4'
+    });
+
+    if (success) {
+      alert('Transactions exported to PDF successfully!');
+    } else if (pdfError) {
+      alert(`Failed to export PDF: ${pdfError}`);
     }
   };
 
@@ -165,6 +197,26 @@ export default function Transactions() {
           <Link href="/transactions/create" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors">
             Record New Transaction
           </Link>
+          <button 
+            onClick={handleExportToPDF}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg transition-colors flex items-center"
+          >
+            {isPDFGenerating ? (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Exporting...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Export to PDF
+              </>
+            )}
+          </button>
         </div>
       </div>
       
@@ -221,10 +273,12 @@ export default function Transactions() {
                       {transaction.transactionId || transaction._id}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                      {transaction.customer?.name || 'Unknown Customer'}
+                      {typeof transaction.customer === 'string' ? 
+                        transaction.customer : 
+                        (transaction.customer?.name || 'Unknown Customer')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                      {transaction.amount ? `₹${parseFloat(transaction.amount).toLocaleString('en-IN')}` : 'Not specified'}
+                      {transaction.amount ? `₹${parseFloat(String(transaction.amount)).toLocaleString('en-IN')}` : 'Not specified'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -243,7 +297,7 @@ export default function Transactions() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
                       {isValidDate(transaction.date || transaction.createdAt) ? 
-                        new Date(transaction.date || transaction.createdAt).toLocaleDateString('en-IN', { 
+                        new Date(transaction.date || transaction.createdAt || '').toLocaleDateString('en-IN', { 
                           day: '2-digit', 
                           month: 'short', 
                           year: 'numeric' 

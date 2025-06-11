@@ -4,9 +4,34 @@ import { useState, useEffect } from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
 import { businessProfileService } from '@/lib/api';
 
+interface BusinessProfile {
+  name: string;
+  email: string;
+  phone: string;
+  website: string;
+  address: string;
+  taxIdentification: {
+    gstin: string;
+    pan: string;
+  };
+  bankDetails: {
+    accountName: string;
+    accountNumber: string;
+    bankName: string;
+    ifscCode: string;
+    branchName: string;
+  };
+  invoiceSettings: {
+    prefix: string;
+    nextNumber: number;
+    termsAndConditions: string;
+  };
+  logo: string | null;
+}
+
 export default function BusinessProfile() {
   // Initialize with empty states, will be populated from API
-  const [businessProfile, setBusinessProfile] = useState({
+  const [businessProfile, setBusinessProfile] = useState<BusinessProfile>({
     name: '',
     email: '',
     phone: '',
@@ -42,8 +67,8 @@ export default function BusinessProfile() {
       try {
         setLoading(true);
         const data = await businessProfileService.get();
-        setBusinessProfile(data);
-        setFormData(data);
+        setBusinessProfile(data as BusinessProfile);
+        setFormData(data as BusinessProfile);
         setLoading(false);
       } catch (err) {
         console.error('Error fetching business profile:', err);
@@ -112,8 +137,8 @@ export default function BusinessProfile() {
     
     try {
       setLoading(true);
-      const updatedProfile = await businessProfileService.update(formData);
-      setBusinessProfile(updatedProfile);
+      const updatedProfile = await businessProfileService.update(formData as unknown as Record<string, unknown>);
+      setBusinessProfile(updatedProfile as BusinessProfile);
       setIsEditing(false);
       setLoading(false);
       alert('Business profile updated successfully!');

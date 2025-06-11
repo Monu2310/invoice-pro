@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from "@/components/layouts/DashboardLayout";
-import { transactionService, customerService, invoiceService } from "@/lib/api";
+import { transactionService, customerService, invoiceService, Customer, Invoice } from "@/lib/api";
 import Link from 'next/link';
 
 export default function CreateTransaction() {
@@ -20,12 +20,12 @@ export default function CreateTransaction() {
     status: 'Completed'
   });
   
-  const [customers, setCustomers] = useState([]);
-  const [invoices, setInvoices] = useState([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState(null);
-  const [customerInvoices, setCustomerInvoices] = useState([]);
+  const [error, setError] = useState<string | null>(null);
+  const [customerInvoices, setCustomerInvoices] = useState<Invoice[]>([]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -49,11 +49,18 @@ export default function CreateTransaction() {
     fetchData();
   }, []);
 
+  // Helper function to get customer ID from invoice
+  const getCustomerId = (customer: Customer | string | undefined): string | undefined => {
+    if (!customer) return undefined;
+    if (typeof customer === 'string') return customer;
+    return customer._id;
+  };
+
   // Update available invoices when customer changes
   useEffect(() => {
     if (formData.customerId && invoices.length > 0) {
       const filteredInvoices = invoices.filter(
-        invoice => invoice.customer?._id === formData.customerId || invoice.customerId === formData.customerId
+        invoice => getCustomerId(invoice.customer) === formData.customerId
       );
       setCustomerInvoices(filteredInvoices);
     } else {
@@ -61,7 +68,7 @@ export default function CreateTransaction() {
     }
   }, [formData.customerId, invoices]);
 
-  const handleChange = (e) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     
     // If changing customer, reset invoice
@@ -79,24 +86,41 @@ export default function CreateTransaction() {
     }
   };
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     setError(null);
 
     try {
       // Format the data for submission
-      const transactionData = {
-        ...formData,
+      const transactionData: Partial<{
+        amount: number;
+        type: string;
+        method: string;
+        date: string;
+        reference: string; 
+        notes: string;
+        status: string;
+        customer: string;
+        invoice: string;
+      }> = {
         amount: parseFloat(formData.amount), // Ensure amount is a number
+        type: formData.type,
+        method: formData.method,
+        date: formData.date,
+        reference: formData.reference,
+        notes: formData.notes,
+        status: formData.status
       };
       
       // Set customer ID correctly (MongoDB expects just the ID, not an object)
       if (formData.customerId) {
         transactionData.customer = formData.customerId;
-        
-        // Remove customerId since we're using 'customer' field
-        delete transactionData.customerId;
+      }
+      
+      // Set invoice ID if provided
+      if (formData.invoiceId) {
+        transactionData.invoice = formData.invoiceId;
       }
       
       console.log('Sending transaction data:', transactionData);
@@ -280,7 +304,7 @@ export default function CreateTransaction() {
                     <option value="">Select an invoice (optional)</option>
                     {customerInvoices.map(invoice => (
                       <option key={invoice._id} value={invoice._id}>
-                        Invoice #{invoice.invoiceNumber || invoice._id} - ₹{parseFloat(invoice.totalAmount).toLocaleString('en-IN')}
+                        Invoice #{invoice.invoiceNumber || invoice._id} - ₹{parseFloat(String(invoice.total || 0)).toLocaleString('en-IN')}
                       </option>
                     ))}
                   </select>

@@ -2,8 +2,24 @@
 
 import { useState, useEffect } from "react";
 import DashboardLayout from "@/components/layouts/DashboardLayout";
-import { invoiceService, customerService, orderService, transactionService } from "@/lib/api";
+import { invoiceService, customerService, orderService, transactionService, Invoice, Customer, Transaction } from "@/lib/api";
 import Link from "next/link";
+
+interface DashboardTransaction {
+  id: string;
+  uniqueKey: string;
+  customer: string;
+  amount: string;
+  status: string;
+  date: string;
+}
+
+interface UpcomingPayment {
+  customer: string;
+  amount: string;
+  dueDate: Date;
+  daysLeft: number;
+}
 
 export default function Dashboard() {
   const [stats, setStats] = useState([
@@ -13,15 +29,15 @@ export default function Dashboard() {
     { title: 'Active Orders', value: '0', change: '0', positive: true },
   ]);
   
-  const [recentTransactions, setRecentTransactions] = useState([]);
-  const [upcomingPayments, setUpcomingPayments] = useState([]);
+  const [recentTransactions, setRecentTransactions] = useState<DashboardTransaction[]>([]);
+  const [upcomingPayments, setUpcomingPayments] = useState<UpcomingPayment[]>([]);
   const [customerActivity, setCustomerActivity] = useState({
     newCustomers: 0,
     returningCustomers: 0,
     referrals: 0
   });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchDashboardData() {
@@ -38,8 +54,8 @@ export default function Dashboard() {
         
         // Calculate total revenue from paid invoices
         const totalRevenue = invoices
-          .filter(invoice => invoice.paymentStatus === 'Paid')
-          .reduce((sum, invoice) => sum + (parseFloat(invoice.total) || 0), 0);
+          .filter((invoice: Invoice) => invoice.paymentStatus === 'Paid')
+          .reduce((sum, invoice) => sum + (parseFloat(String(invoice.total || 0)) || 0), 0);
         
         // Count pending invoices
         const pendingInvoices = invoices.filter(invoice => invoice.paymentStatus === 'Pending').length;
@@ -47,8 +63,8 @@ export default function Dashboard() {
         // Get new customers (added in last 30 days)
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-        const newCustomersCount = customers.filter(customer => {
-          return new Date(customer.createdAt) > thirtyDaysAgo;
+        const newCustomersCount = customers.filter((customer: Customer) => {
+          return customer.createdAt && new Date(customer.createdAt) > thirtyDaysAgo;
         }).length;
         
         // Count active orders
@@ -84,13 +100,17 @@ export default function Dashboard() {
         
         // Set recent transactions (latest 5)
         const sortedTransactions = [...transactions]
-          .sort((a, b) => new Date(b.date || b.createdAt || 0) - new Date(a.date || a.createdAt || 0))
+          .sort((a, b) => {
+            const dateA = new Date(a.date || a.createdAt || 0).getTime();
+            const dateB = new Date(b.date || b.createdAt || 0).getTime();
+            return dateB - dateA;
+          })
           .slice(0, 5)
-          .map((transaction, index) => ({
+          .map((transaction: Transaction, index: number): DashboardTransaction => ({
             id: transaction.invoiceId || transaction._id || `unknown-${index}`,
             uniqueKey: `tx-${transaction._id || index}`, // Guaranteed unique key for React
-            customer: transaction.customer?.name || 'Unknown Customer',
-            amount: `₹${parseFloat(transaction.amount || 0).toLocaleString('en-IN')}`,
+            customer: typeof transaction.customer === 'string' ? transaction.customer : transaction.customer?.name || 'Unknown Customer',
+            amount: `₹${parseFloat(String(transaction.amount || 0)).toLocaleString('en-IN')}`,
             status: transaction.status || 'Pending',
             date: new Date(transaction.date || transaction.createdAt || new Date()).toLocaleDateString('en-IN', { 
               day: '2-digit', 
@@ -102,14 +122,18 @@ export default function Dashboard() {
         
         // Set upcoming payments (pending invoices with nearest due dates)
         const upcomingPaymentsList = invoices
-          .filter(invoice => invoice.paymentStatus === 'Pending')
-          .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+          .filter((invoice: Invoice) => invoice.paymentStatus === 'Pending')
+          .sort((a, b) => {
+            const dateA = new Date(a.dueDate || 0).getTime();
+            const dateB = new Date(b.dueDate || 0).getTime();
+            return dateA - dateB;
+          })
           .slice(0, 3)
-          .map(invoice => ({
-            customer: invoice.customer?.name || 'Unknown Customer',
-            amount: `₹${parseFloat(invoice.total).toLocaleString('en-IN')}`,
-            dueDate: new Date(invoice.dueDate),
-            daysLeft: Math.ceil((new Date(invoice.dueDate) - new Date()) / (1000 * 60 * 60 * 24))
+          .map((invoice: Invoice): UpcomingPayment => ({
+            customer: typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.name || 'Unknown Customer',
+            amount: `₹${parseFloat(String(invoice.total || 0)).toLocaleString('en-IN')}`,
+            dueDate: new Date(invoice.dueDate || new Date()),
+            daysLeft: Math.ceil((new Date(invoice.dueDate || new Date()).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
           }));
         setUpcomingPayments(upcomingPaymentsList);
         
@@ -166,7 +190,7 @@ export default function Dashboard() {
     <DashboardLayout>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Dashboard Overview</h1>
-        <p className="text-gray-600 dark:text-gray-300">Welcome back! Here's what's happening with your business today.</p>
+        <p className="text-gray-600 dark:text-gray-300">Welcome back! Here&apos;s what&apos;s happening with your business today.</p>
       </div>
       
       {/* Stats Cards */}

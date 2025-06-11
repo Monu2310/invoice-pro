@@ -3,8 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
-import { orderService, customerService } from '@/lib/api';
-
+import { orderService, customerService, Customer } from '@/lib/api';
 // Define types
 interface OrderItem {
   id: number;
@@ -14,14 +13,6 @@ interface OrderItem {
   price: string | number;
   tax: number;
   amount: number;
-}
-
-interface Customer {
-  _id: string;
-  name: string;
-  email: string;
-  phone: string;
-  // Add other customer fields as needed
 }
 
 interface ShippingAddress {
@@ -208,7 +199,7 @@ export default function CreateOrder() {
       
       // Prepare order data
       const orderData = {
-        customer: selectedCustomer,
+        customer: selectedCustomer, // Customer ID string for creation
         orderNumber: orderNumber || undefined, // Let server generate if not provided
         orderDate: orderDate,
         items: formattedItems,
@@ -218,14 +209,14 @@ export default function CreateOrder() {
         notes: notes,
         status: status,
         paymentStatus: paymentStatus,
-        shippingAddress: shippingAddress,
-        billingAddress: billingAddress,
-        paymentDetails: {
+        shippingAddress: shippingAddress as unknown as Record<string, unknown>,
+        billingAddress: billingAddress as unknown as Record<string, unknown>,
+        paymentDetails: paymentMethod || transactionId || (paidAmount && Number(paidAmount) > 0) ? {
           method: paymentMethod || undefined,
           transactionId: transactionId || undefined,
           paidAmount: paidAmount ? Number(paidAmount) : 0,
-          paidDate: paidAmount && Number(paidAmount) > 0 ? new Date() : undefined
-        }
+          paidDate: paidAmount && Number(paidAmount) > 0 ? new Date().toISOString() : undefined
+        } : undefined
       };
       
       // Send to API

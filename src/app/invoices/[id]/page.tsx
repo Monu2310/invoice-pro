@@ -4,21 +4,23 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import React from 'react';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
-import { invoiceService } from '@/lib/api';
-import html2canvas from 'html2canvas';
-import { jsPDF } from 'jspdf';
+import { invoiceService, Invoice, Customer, InvoiceItem } from '@/lib/api';
+import PDFDownloadButton from '@/components/ui/PDFDownloadButton';
 
-export default function ViewInvoice({ params }) {
+interface Params {
+  id: string;
+}
+
+export default function ViewInvoice({ params }: { params: Promise<Params> }) {
   const router = useRouter();
-  const [invoice, setInvoice] = useState(null);
+  const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   const [showSendDialog, setShowSendDialog] = useState(false);
-  const [sendMethod, setSendMethod] = useState('email');
-  const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [sendMethod, setSendMethod] = useState<'email' | 'whatsapp'>('email');
   
   // Reference to the invoice content for PDF generation
-  const invoiceRef = useRef(null);
+  const invoiceRef = useRef<HTMLDivElement>(null);
   
   // Email state
   const [emailTo, setEmailTo] = useState('');
@@ -34,7 +36,7 @@ export default function ViewInvoice({ params }) {
   const [statusType, setStatusType] = useState(''); // 'success' or 'error'
 
   // Unwrap the params object with React.use()
-  const unwrappedParams = React.use(params);
+  const unwrappedParams = React.use(params) as Params;
   const invoiceId = unwrappedParams.id;
 
   useEffect(() => {
@@ -45,17 +47,21 @@ export default function ViewInvoice({ params }) {
         setInvoice(data);
         
         // Set email defaults after we have the invoice data
-        setEmailTo(data.customer?.email || '');
+        const customerEmail = typeof data.customer === 'object' ? data.customer?.email : '';
+        const customerName = typeof data.customer === 'object' ? data.customer?.name : 'Customer';
+        const customerPhone = typeof data.customer === 'object' ? data.customer?.phone : '';
+        
+        setEmailTo(customerEmail || '');
         setEmailSubject(`Invoice ${data.invoiceNumber || data._id} from Your Company`);
-        setEmailBody(`Dear ${data.customer?.name},\n\nPlease find attached the invoice ${data.invoiceNumber || data._id} for your recent purchase.\n\nTotal Amount: ₹${parseFloat(data.total).toFixed(2)}\nDue Date: ${new Date(data.dueDate).toLocaleDateString('en-IN', { 
+        setEmailBody(`Dear ${customerName},\n\nPlease find attached the invoice ${data.invoiceNumber || data._id} for your recent purchase.\n\nTotal Amount: ₹${parseFloat(String(data.total || 0)).toFixed(2)}\nDue Date: ${new Date(data.dueDate || new Date()).toLocaleDateString('en-IN', { 
           day: '2-digit', 
           month: 'short', 
           year: 'numeric' 
         })}\n\nPlease let us know if you have any questions.\n\nThank you for your business!\n\nBest regards,\nYour Company`);
         
         // Set WhatsApp defaults
-        setWhatsappNumber(data.customer?.phone || '');
-        setWhatsappMessage(`Dear ${data.customer?.name},\n\nYour invoice ${data.invoiceNumber || data._id} has been prepared.\n\nTotal Amount: ₹${parseFloat(data.total).toFixed(2)}\nDue Date: ${new Date(data.dueDate).toLocaleDateString('en-IN', { 
+        setWhatsappNumber(customerPhone || '');
+        setWhatsappMessage(`Dear ${customerName},\n\nYour invoice ${data.invoiceNumber || data._id} has been prepared.\n\nTotal Amount: ₹${parseFloat(String(data.total || 0)).toFixed(2)}\nDue Date: ${new Date(data.dueDate || new Date()).toLocaleDateString('en-IN', { 
           day: '2-digit', 
           month: 'short', 
           year: 'numeric' 
@@ -74,72 +80,7 @@ export default function ViewInvoice({ params }) {
     }
   }, [invoiceId]);
 
-  const handleDownloadPdf = async () => {
-    if (!invoiceRef.current) return;
-    
-    setGeneratingPdf(true);
-    
-    try {
-      // Create a clone of the invoice DOM to modify for PDF
-      const invoiceClone = invoiceRef.current.cloneNode(true);
-      const tempDiv = document.createElement('div');
-      tempDiv.appendChild(invoiceClone);
-      
-      // Temporarily append to body but with hidden styles
-      tempDiv.style.position = 'absolute';
-      tempDiv.style.left = '-9999px';
-      tempDiv.style.top = '-9999px';
-      document.body.appendChild(tempDiv);
-      
-      // Override any problematic CSS (like oklch)
-      const allElements = tempDiv.querySelectorAll('*');
-      allElements.forEach(el => {
-        // Get computed style
-        const style = window.getComputedStyle(el);
-        // Apply computed RGB colors directly to override any problematic color formats
-        el.style.color = style.color;
-        el.style.backgroundColor = style.backgroundColor;
-        el.style.borderColor = style.borderColor;
-      });
-      
-      // Capture the invoice content as an image
-      const canvas = await html2canvas(invoiceClone, { 
-        scale: 2, // Increase scale for better quality
-        useCORS: true, // Enable cross-origin image fetching
-        logging: false // Disable logging
-      });
-      
-      // Clean up - remove the temp div
-      document.body.removeChild(tempDiv);
-      
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgWidth = 210; // A4 width in mm
-      const pageHeight = 295; // A4 height in mm
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      
-      let position = 0;
-      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-      
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
-      }
-      
-      pdf.save(`invoice_${invoice.invoiceNumber || invoice._id}.pdf`);
-      setGeneratingPdf(false);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      setGeneratingPdf(false);
-      alert('Failed to generate PDF. Please try again.');
-    }
-  };
-
-  const handleSendEmail = async (e) => {
+  const handleSendEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     setSendingStatus('Sending email...');
     setStatusType('');
@@ -152,9 +93,10 @@ export default function ViewInvoice({ params }) {
       });
       
       // Check if there was an HTML or parse error
-      if (response && response.error) {
+      if (response && typeof response === 'object' && 'error' in response) {
         console.error('Error response:', response);
-        setSendingStatus(`Failed to send email: ${response.error}`);
+        const errorResponse = response as { error: string };
+        setSendingStatus(`Failed to send email: ${errorResponse.error}`);
         setStatusType('error');
         return;
       }
@@ -174,7 +116,7 @@ export default function ViewInvoice({ params }) {
     }
   };
   
-  const handleSendWhatsApp = async (e) => {
+  const handleSendWhatsApp = async (e: React.FormEvent) => {
     e.preventDefault();
     setSendingStatus('Sending WhatsApp message...');
     setStatusType('');
@@ -186,20 +128,27 @@ export default function ViewInvoice({ params }) {
       });
       
       // Check if there was an HTML or parse error
-      if (response && response.error) {
+      if (response && typeof response === 'object' && 'error' in response) {
         console.error('Error response:', response);
-        setSendingStatus(`Failed to send WhatsApp message: ${response.error}`);
+        const errorResponse = response as { error: string };
+        setSendingStatus(`Failed to send WhatsApp message: ${errorResponse.error}`);
         setStatusType('error');
         return;
       }
       
       // Check if this is a development mode response (simulated success)
-      if (response && response.note && response.note.includes('simulated')) {
-        setSendingStatus(`${response.message} (Development mode)`);
-        setStatusType('success');
-        
-        // Show additional info about development mode
-        console.info('Development mode WhatsApp message:', response.note);
+      if (response && typeof response === 'object' && 'note' in response && 'message' in response) {
+        const devResponse = response as { note: string; message: string };
+        if (devResponse.note.includes('simulated')) {
+          setSendingStatus(`${devResponse.message} (Development mode)`);
+          setStatusType('success');
+          
+          // Show additional info about development mode
+          console.info('Development mode WhatsApp message:', devResponse.note);
+        } else {
+          setSendingStatus('WhatsApp message sent successfully!');
+          setStatusType('success');
+        }
       } else {
         setSendingStatus('WhatsApp message sent successfully!');
         setStatusType('success');
@@ -217,8 +166,25 @@ export default function ViewInvoice({ params }) {
     }
   };
 
+  // Type guard to check if customer is a Customer object
+  const getCustomerDisplay = (customer: string | Customer | undefined): {
+    name: string;
+    email: string;
+    phone: string;
+    address: string | Record<string, unknown> | undefined;
+  } => {
+    if (!customer) return { name: 'Unknown Customer', email: 'No email provided', phone: 'No phone provided', address: undefined };
+    if (typeof customer === 'string') return { name: customer, email: 'No email provided', phone: 'No phone provided', address: undefined };
+    return {
+      name: customer.name || 'Unknown Customer',
+      email: customer.email || 'No email provided',
+      phone: customer.phone || 'No phone provided',
+      address: customer.address
+    };
+  };
+
   // Format customer address
-  const formatAddress = (address) => {
+  const formatAddress = (address: Customer['address']) => {
     if (!address) return 'No address provided';
     
     if (typeof address === 'string') return address;
@@ -278,7 +244,7 @@ export default function ViewInvoice({ params }) {
 
   // Format dates with error handling
   const issueDate = invoice?.issueDate || invoice?.createdAt 
-    ? new Date(invoice.issueDate || invoice.createdAt).toLocaleDateString('en-IN', { 
+    ? new Date(invoice.issueDate || invoice.createdAt!).toLocaleDateString('en-IN', { 
         day: '2-digit', 
         month: 'short', 
         year: 'numeric' 
@@ -319,13 +285,24 @@ export default function ViewInvoice({ params }) {
           </p>
         </div>
         <div className="flex space-x-2">
-          <button 
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors"
-            onClick={handleDownloadPdf}
-            disabled={generatingPdf}
-          >
-            {generatingPdf ? 'Generating PDF...' : 'Download PDF'}
-          </button>
+          <PDFDownloadButton
+            elementRef={invoiceRef}
+            options={{
+              filename: `invoice_${invoice.invoiceNumber || invoice._id}_${getCustomerDisplay(invoice.customer).name.replace(/\s+/g, '_')}.pdf`,
+              title: `Invoice ${invoice.invoiceNumber || invoice._id}`,
+              orientation: 'portrait',
+              format: 'a4'
+            }}
+            onSuccess={(filename: string) => {
+              console.log(`PDF generated successfully: ${filename}`);
+            }}
+            onError={(error: string) => {
+              console.error('PDF generation failed:', error);
+              alert(`Failed to generate PDF: ${error}`);
+            }}
+            variant="primary"
+            size="md"
+          />
           <button 
             className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700"
             onClick={() => setShowSendDialog(true)}
@@ -346,11 +323,19 @@ export default function ViewInvoice({ params }) {
         <div className="p-6 border-b border-gray-200 dark:border-gray-700">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1">Invoice To:</h3>
-              <p className="text-gray-700 dark:text-gray-300 font-medium">{invoice.customer?.name || 'Unknown Customer'}</p>
-              <p className="text-gray-600 dark:text-gray-400 whitespace-pre-line">{formatAddress(invoice.customer?.address)}</p>
-              <p className="text-gray-600 dark:text-gray-400">{invoice.customer?.email || 'No email provided'}</p>
-              <p className="text-gray-600 dark:text-gray-400">{invoice.customer?.phone || 'No phone provided'}</p>
+              {/* Use the helper function to safely get customer properties */}
+              {(() => {
+                const customer = getCustomerDisplay(invoice.customer);
+                return (
+                  <>
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1">Invoice To:</h3>
+                    <p className="text-gray-700 dark:text-gray-300 font-medium">{customer.name}</p>
+                    <p className="text-gray-600 dark:text-gray-400 whitespace-pre-line">{formatAddress(customer.address)}</p>
+                    <p className="text-gray-600 dark:text-gray-400">{customer.email}</p>
+                    <p className="text-gray-600 dark:text-gray-400">{customer.phone}</p>
+                  </>
+                );
+              })()}
             </div>
             <div className="md:text-right">
               <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-1">Invoice Details:</h3>
@@ -389,11 +374,11 @@ export default function ViewInvoice({ params }) {
               </tr>
             </thead>
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {invoice.items && invoice.items.map((item, index) => (
+              {invoice.items && invoice.items.map((item: InvoiceItem, index: number) => (
                 <tr key={item._id || index}>
                   <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{item.description}</td>
                   <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{item.quantity}</td>
-                  <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{parseFloat(item.price).toFixed(2)}</td>
+                  <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{parseFloat(item.price.toString()).toFixed(2)}</td>
                   <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{item.tax || 0}%</td>
                   <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 text-right">{(item.quantity * item.price).toFixed(2)}</td>
                 </tr>
@@ -408,21 +393,21 @@ export default function ViewInvoice({ params }) {
             <div className="w-full md:w-72">
               <div className="flex justify-between py-2">
                 <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
-                <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(invoice.subtotal || 0).toFixed(2)}</span>
+                <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat((invoice.subtotal || 0).toString()).toFixed(2)}</span>
               </div>
               <div className="flex justify-between py-2">
                 <span className="text-gray-600 dark:text-gray-400">Tax:</span>
-                <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat(invoice.tax || 0).toFixed(2)}</span>
+                <span className="font-medium text-gray-800 dark:text-white">₹{parseFloat((invoice.tax || 0).toString()).toFixed(2)}</span>
               </div>
               <div className="flex justify-between py-2 border-t border-gray-200 dark:border-gray-700">
                 <span className="text-lg font-medium text-gray-800 dark:text-white">Total:</span>
-                <span className="text-lg font-bold text-gray-800 dark:text-white">₹{parseFloat(invoice.total || 0).toFixed(2)}</span>
+                <span className="text-lg font-bold text-gray-800 dark:text-white">₹{parseFloat((invoice.total || 0).toString()).toFixed(2)}</span>
               </div>
               
               {invoice.paymentStatus === 'Paid' && (
                 <div className="flex justify-between py-2 border-t border-gray-200 dark:border-gray-700 text-green-600 dark:text-green-400">
                   <span className="font-medium">Paid:</span>
-                  <span className="font-bold">₹{parseFloat(invoice.total || 0).toFixed(2)}</span>
+                  <span className="font-bold">₹{parseFloat((invoice.total || 0).toString()).toFixed(2)}</span>
                 </div>
               )}
             </div>

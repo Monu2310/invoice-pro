@@ -3,16 +3,24 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from "@/components/layouts/DashboardLayout";
-import { invoiceService } from "@/lib/api";
+import { invoiceService, Invoice, Customer } from "@/lib/api";
+import { useAdvancedPDFGenerator } from '@/lib/pdf-utils';
 import Link from 'next/link';
+
+// Helper function to safely get customer name
+const getCustomerName = (customer: string | Customer | undefined): string => {
+  if (!customer) return 'Unknown Customer';
+  if (typeof customer === 'string') return customer;
+  return customer.name || 'Unknown Customer';
+};
 
 export default function Invoices() {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('All');
-  const [invoices, setInvoices] = useState([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   
   useEffect(() => {
     async function fetchInvoices() {
@@ -34,7 +42,7 @@ export default function Invoices() {
   // Filter invoices based on search query and status filter
   const filteredInvoices = invoices.filter(invoice => {
     const invoiceId = invoice.invoiceNumber || invoice._id || '';
-    const customerName = invoice.customer?.name || '';
+    const customerName = typeof invoice.customer === 'string' ? invoice.customer : invoice.customer?.name || '';
     
     const matchesSearch = 
       invoiceId.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -44,15 +52,15 @@ export default function Invoices() {
     return matchesSearch && matchesFilter;
   });
 
-  const handleViewInvoice = (id) => {
+  const handleViewInvoice = (id: string) => {
     router.push(`/invoices/${id}`);
   };
 
-  const handleEditInvoice = (id) => {
+  const handleEditInvoice = (id: string) => {
     router.push(`/invoices/${id}/edit`);
   };
 
-  const handleDeleteInvoice = async (id) => {
+  const handleDeleteInvoice = async (id: string) => {
     if (window.confirm('Are you sure you want to delete this invoice? This action cannot be undone.')) {
       try {
         await invoiceService.delete(id);
@@ -62,6 +70,34 @@ export default function Invoices() {
         console.error('Error deleting invoice:', err);
         alert('Failed to delete invoice. Please try again.');
       }
+    }
+  };
+
+  // PDF export functionality
+  const { generateTablePDF, isGenerating: isPDFGenerating, error: pdfError } = useAdvancedPDFGenerator();
+
+  const handleExportToPDF = async () => {
+    const tableData = filteredInvoices.map(invoice => ({
+      'Invoice ID': invoice.invoiceNumber || invoice._id || 'N/A',
+      'Customer': getCustomerName(invoice.customer),
+      'Date': new Date(invoice.createdAt || Date.now()).toLocaleDateString(),
+      'Amount': `$${(invoice.total || 0).toFixed(2)}`,
+      'Status': invoice.paymentStatus || 'Pending'
+    }));
+
+    const headers = ['Invoice ID', 'Customer', 'Date', 'Amount', 'Status'];
+    
+    const success = await generateTablePDF(tableData, headers, {
+      filename: `invoices_export_${new Date().toISOString().split('T')[0]}.pdf`,
+      title: 'Invoices Report',
+      orientation: 'landscape',
+      format: 'a4'
+    });
+
+    if (success) {
+      alert('Invoices exported to PDF successfully!');
+    } else if (pdfError) {
+      alert(`Failed to export PDF: ${pdfError}`);
     }
   };
 
@@ -93,9 +129,30 @@ export default function Invoices() {
           <h1 className="text-2xl font-bold text-gray-800 dark:text-white">Invoices</h1>
           <p className="text-gray-600 dark:text-gray-300">Manage your invoices and track payments</p>
         </div>
-        <Link href="/invoices/create" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors">
-          Create New Invoice
-        </Link>
+        <div className="flex gap-3">
+          <button
+            onClick={handleExportToPDF}
+            disabled={isPDFGenerating || filteredInvoices.length === 0}
+            className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+          >
+            {isPDFGenerating ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                Exporting...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                Export PDF
+              </>
+            )}
+          </button>
+          <Link href="/invoices/create" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg transition-colors">
+            Create New Invoice
+          </Link>
+        </div>
       </div>
       
       {/* Filters and Search */}
@@ -151,10 +208,10 @@ export default function Invoices() {
                       {invoice.invoiceNumber || invoice._id}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                      {invoice.customer?.name || 'Unknown Customer'}
+                      {getCustomerName(invoice.customer)}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                      ₹{parseFloat(invoice.total || 0).toLocaleString('en-IN')}
+                      ₹{parseFloat(String(invoice.total || 0)).toLocaleString('en-IN')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${
@@ -167,7 +224,7 @@ export default function Invoices() {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
-                      {new Date(invoice.issueDate || invoice.createdAt).toLocaleDateString('en-IN', { 
+                      {new Date(invoice.issueDate || invoice.createdAt || new Date()).toLocaleDateString('en-IN', { 
                         day: '2-digit', 
                         month: 'short', 
                         year: 'numeric' 

@@ -37,68 +37,66 @@ export const useAuth = () => useContext(AuthContext);
 
 // Auth Provider component
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  // Initialize user state directly from localStorage if possible
-  const initializeUserFromStorage = () => {
-    if (typeof window !== 'undefined') {
-      try {
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          return JSON.parse(storedUser);
-        }
-      } catch (e) {
-        console.error('Error parsing stored user:', e);
-      }
-    }
-    return null;
-  };
-
-  const [user, setUser] = useState<User | null>(initializeUserFromStorage());
-  const [isLoading, setIsLoading] = useState(typeof window !== 'undefined' && !!localStorage.getItem('token'));
+  // Initialize states with null/false to avoid hydration issues
+  const [user, setUser] = useState<User | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   const router = useRouter();
 
-  // Check if user is logged in on initial load
+  // Initialize user state from localStorage after component mounts
   useEffect(() => {
-    const checkAuthStatus = async () => {
+    setMounted(true);
+    
+    const initializeAuth = async () => {
       try {
-        // Only proceed if we have a token
-        if (typeof window !== 'undefined') {
-          const token = localStorage.getItem('token');
-          
-          if (!token) {
-            setIsLoading(false);
-            return;
-          }
-          
-          // Only fetch user data if we don't already have it
-          if (!user) {
-            setIsLoading(true);
+        const storedUser = localStorage.getItem('user');
+        const token = localStorage.getItem('token');
+        
+        if (storedUser && token) {
+          try {
+            const userData = JSON.parse(storedUser);
+            setUser(userData);
+            
+            // Optionally verify token is still valid
             try {
-              const userData = await authService.getCurrentUser();
-              if (userData) {
-                setUser(userData);
-                localStorage.setItem('user', JSON.stringify(userData));
+              const currentUserData = await authService.getCurrentUser();
+              if (currentUserData && typeof currentUserData === 'object' && 'name' in currentUserData) {
+                setUser(currentUserData as User);
+                localStorage.setItem('user', JSON.stringify(currentUserData));
               }
             } catch (apiErr) {
-              console.error('Error fetching user data:', apiErr);
-              // Don't logout if API fails - rely on stored data
-            } finally {
-              setIsLoading(false);
+              console.error('Error verifying user data:', apiErr);
+              // Keep using stored data if API fails
             }
-          } else {
-            // We already have user data from localStorage
-            setIsLoading(false);
+          } catch (parseErr) {
+            console.error('Error parsing stored user:', parseErr);
+            localStorage.removeItem('user');
+            localStorage.removeItem('token');
           }
         }
-      } catch (err: any) {
-        console.error('Auth check error:', err);
-        setError(err.message || 'Authentication failed');
+      } catch (err: unknown) {
+        console.error('Auth initialization error:', err);
+        setError(err instanceof Error ? err.message : 'Authentication failed');
+      } finally {
         setIsLoading(false);
       }
     };
-    
-    checkAuthStatus();
-  }, [user]);
+
+    initializeAuth();
+  }, []);
+
+  // Don't render children until mounted to prevent hydration issues
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-gray-900 dark:to-gray-800 flex flex-col justify-center items-center">
+        <div className="animate-pulse">
+          <div className="h-8 w-32 bg-indigo-200 rounded mb-4"></div>
+          <div className="h-4 w-48 bg-gray-200 rounded"></div>
+        </div>
+      </div>
+    );
+  }
 
   // Login function
   const login = async (email: string, password: string) => {
@@ -108,19 +106,25 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const response = await authService.login({ email, password });
       
-      // Save token and user info to localStorage
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('token', response.token);
-        localStorage.setItem('user', JSON.stringify(response.user));
+      // Type guard for login response
+      if (response && typeof response === 'object' && 'token' in response && 'user' in response) {
+        const loginResponse = response as { token: string; user: User };
+        
+        // Save token and user info to localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('token', loginResponse.token);
+          localStorage.setItem('user', JSON.stringify(loginResponse.user));
+        }
+        
+        // Update state
+        setUser(loginResponse.user);
+        
+        // Redirect to dashboard
+        router.push('/dashboard');
       }
-      
-      // Update state
-      setUser(response.user);
-      
-      // Redirect to dashboard
-      router.push('/dashboard');
-    } catch (err: any) {
-      setError(err.message || 'Login failed. Please check your credentials.');
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : 'Login failed. Please check your credentials.';
+      setError(errorMessage);
       throw err;
     } finally {
       setIsLoading(false);

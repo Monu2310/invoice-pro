@@ -77,12 +77,13 @@ export default function CreateCustomer() {
       
       alert('Customer created successfully!');
       router.push('/customers');
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating customer:', error);
-      if (error.message === 'E11000 duplicate key error collection') {
+      if (error instanceof Error && error.message === 'E11000 duplicate key error collection') {
         setErrors({ email: 'A customer with this email already exists' });
       } else {
-        alert(`Failed to create customer: ${error.message || 'Unknown error'}`);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        alert(`Failed to create customer: ${errorMessage}`);
       }
     } finally {
       setLoading(false);

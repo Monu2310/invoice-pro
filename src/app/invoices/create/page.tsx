@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
-import { invoiceService, customerService } from '@/lib/api';
+import { invoiceService, customerService, Customer, Invoice } from '@/lib/api';
 
 // Define type for invoice items
 interface InvoiceItem {
@@ -15,12 +15,26 @@ interface InvoiceItem {
   tax: number;
 }
 
-interface Customer {
-  _id: string;
-  name: string;
-  email: string;
-  phone: string;
-  // Add other customer fields as needed
+// Define interface for creating invoices (different from the full Invoice interface)
+interface CreateInvoiceData {
+  customer: string; // Customer ID as string for creation
+  invoiceNumber?: string;
+  invoiceDate: string;
+  dueDate: string;
+  items: Array<{
+    name: string;
+    description: string;
+    quantity: number;
+    price: number;
+    tax: number;
+    amount: number;
+  }>;
+  subtotal: number;
+  tax: number;
+  total: number;
+  notes: string;
+  status: string;
+  paymentStatus: string;
 }
 
 export default function CreateInvoice() {
@@ -145,7 +159,7 @@ export default function CreateInvoice() {
       }));
       
       // Prepare invoice data exactly matching the server's expected fields
-      const invoiceData = {
+      const invoiceData: CreateInvoiceData = {
         customer: selectedCustomer,
         invoiceNumber: invoiceNumber || undefined, // Let server generate if not provided
         invoiceDate: invoiceDate,
@@ -163,15 +177,15 @@ export default function CreateInvoice() {
       
       try {
         // Send to API with explicit error handling
-        const response = await invoiceService.create(invoiceData);
+        const response = await invoiceService.create(invoiceData as Partial<Invoice>); // API accepts Partial<Invoice>
         console.log('Invoice creation response:', response);
         
         alert('Invoice created successfully!');
         router.push('/invoices');
-      } catch (error) {
+      } catch (error: unknown) {
         console.error('Error creating invoice:', error);
         // Show more detailed error message if available
-        if (error.message) {
+        if (error instanceof Error && error.message) {
           alert(`Failed to create invoice: ${error.message}`);
         } else {
           alert('Failed to create invoice. Please try again.');
@@ -179,9 +193,10 @@ export default function CreateInvoice() {
       } finally {
         setLoading(false);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error creating invoice:', error);
-      alert('Failed to create invoice. Please try again.');
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      alert(`Failed to create invoice: ${errorMessage}`);
     } finally {
       setLoading(false);
     }

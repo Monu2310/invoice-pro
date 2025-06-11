@@ -3,32 +3,12 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import DashboardLayout from '@/components/layouts/DashboardLayout';
-import { customerService, invoiceService } from '@/lib/api';
+import { customerService, invoiceService, Customer, Invoice } from '@/lib/api';
 import Link from 'next/link';
-
-// Define the Customer interface
-interface Customer {
-  _id: string;
-  name: string;
-  email: string;
-  phone: string;
-  address: {
-    street?: string;
-    city?: string;
-    state?: string;
-    zip?: string;
-    country?: string;
-  };
-  company?: string;
-  gstin?: string;
-  status?: 'Active' | 'Inactive';
-  createdAt: string;
-  updatedAt?: string;
-  totalSpent?: number;
-}
 
 interface CustomerWithSpending extends Customer {
   totalSpent: number;
+  status: 'Active' | 'Inactive';
 }
 
 export default function Customers() {
@@ -53,18 +33,24 @@ export default function Customers() {
         // Calculate total spent for each customer from paid invoices
         const customersWithSpending = customersData.map((customer: Customer) => {
           const customerInvoices = invoicesData.filter(
-            (invoice: any) => invoice.customer?._id === customer._id && invoice.status === 'Paid'
+            (invoice: Invoice) => {
+              // Handle different customer reference formats
+              if (typeof invoice.customer === 'string') {
+                return invoice.customer === customer._id && invoice.paymentStatus === 'Paid';
+              } else {
+                return invoice.customer?._id === customer._id && invoice.paymentStatus === 'Paid';
+              }
+            }
           );
           
           const totalSpent = customerInvoices.reduce(
-            (sum: number, invoice: any) => sum + (parseFloat(invoice.total) || 0), 
+            (sum: number, invoice: Invoice) => sum + (parseFloat(String(invoice.total)) || 0), 
             0
           );
           
           return {
             ...customer,
-            // Provide default status if not present
-            status: customer.status || 'Active',
+            status: 'Active' as const,
             totalSpent: totalSpent
           };
         });
@@ -85,7 +71,7 @@ export default function Customers() {
   const filteredCustomers = customers.filter(customer => {
     const matchesSearch = 
       customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (customer.phone && customer.phone.toLowerCase().includes(searchTerm.toLowerCase()));
     
     const matchesStatus = statusFilter === 'All' || customer.status === statusFilter;
@@ -109,7 +95,7 @@ export default function Customers() {
     }
   };
 
-  const formatAddress = (address: any) => {
+  const formatAddress = (address: string | { street?: string; city?: string; state?: string; zip?: string; country?: string; } | undefined) => {
     if (!address) return 'No address';
     
     if (typeof address === 'string') return address;
